@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Real-time Heart Rate Monitor (WebSocket)</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: system-ui, sans-serif;
+    }
+    /* Global CSS variables: unified control over all ratios/spacing, zero-delay adjustment */
+    :root {
+      --heart-scale: 4; /* Heart icon scale */
+      --bpm-scale: 1.8; /* BPM number base scale */
+      --unit-scale: 0.4; /* Gray unit text scale */
+      --base-font-size: clamp(12px, 6vw, 45px); /* Global base font size */
+      --gap-heart-bpm: 0.4em; /* Icon-BPM gap (default reduced to fix large gap issue) */
+      --gap-bpm-unit: 0.3em; /* BPM-unit gap (default reduced to fix large gap issue) */
+    }
+    body {
+      background: #0b1120;
+      color: #fff;
+      width: 100vw;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      place-content: safe center;
+      justify-content: safe center;
+      align-items: center;
+      text-align: center;
+      padding: 8px;
+      overflow: hidden;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .box {
+      width: 100%;
+      min-height: min-content;
+      display: flex;
+      flex-direction: column;
+      place-content: safe center;
+      justify-content: safe center;
+      align-items: center;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    /* Hide non-core UI for minimal floating style */
+    .title, .input-line, .floatBtn, .status, .device {
+      display: none;
+    }
+    /* Core content area: remove unified gap, use independent spacing control */
+    .heart-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      flex-shrink: 0;
+      width: 100%;
+      text-align: center;
+      font-size: var(--base-font-size);
+      margin: auto 0;
+    }
+    /* Clickable gap: transparent layer, precisely corresponding to two spacing areas, double-click to adjust */
+    .gap-click {
+      width: 100%;
+      flex-shrink: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      /* Ensure click area covers the entire gap without dead zones */
+      min-height: 2px;
+    }
+    .gap-heart-bpm {
+      height: var(--gap-heart-bpm);
+    }
+    .gap-bpm-unit {
+      height: var(--gap-bpm-unit);
+    }
+    /* Heart icon: size fully controlled by --heart-scale variable */
+    .heart {
+      width: calc(var(--heart-scale) * 1em);
+      height: auto;
+      aspect-ratio: 1/1;
+      fill: #ef4444;
+      transform-origin: center center;
+      will-change: transform;
+      flex-shrink: 0;
+      margin: 0 auto;
+      shape-rendering: geometricPrecision;
+      transform: scale(1) translateX(0px);
+      transition: transform 0.22s cubic-bezier(0.14, 0.78, 0.34, 1), width 0.1s ease;
+      padding: 0.5em;
+      cursor: pointer;
+    }
+    /* BPM number: size controlled by --bpm-scale variable, double-click to adjust IP */
+    .bpm {
+      font-size: calc(var(--bpm-scale) * 1em);
+      font-weight: 700;
+      color: #f87171;
+      line-height: 1;
+      flex-shrink: 0;
+      margin: 0 auto;
+      width: 100%;
+      text-align: center;
+      cursor: pointer;
+      padding: 0.2em 0;
+      transition: font-size 0.1s ease;
+    }
+    /* Gray unit text: size controlled by --unit-scale variable, double-click to adjust ratio */
+    .unit {
+      font-size: calc(var(--unit-scale) * 1em);
+      color: #94a3b8;
+      flex-shrink: 0;
+      margin: 0 auto;
+      width: 100%;
+      text-align: center;
+      cursor: pointer;
+      padding: 0.2em 0;
+      transition: font-size 0.1s ease;
+    }
+    /* Semi-transparent mask, click to close all panels */
+    .mask {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.7);
+      z-index: 9998;
+      display: none;
+    }
+    .mask.show {
+      display: block;
+    }
+    /* Universal adjustment panel style, unified look */
+    .scale-panel {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #1e293b;
+      padding: 1.5em;
+      border-radius: 12px;
+      z-index: 9999;
+      width: 90%;
+      max-width: 350px;
+      display: none;
+      flex-direction: column;
+      gap: 1.2em;
+      border: 1px solid #334155;
+    }
+    .scale-panel.show {
+      display: flex;
+    }
+    .panel-title {
+      font-size: 1.2em;
+      font-weight: 600;
+      color: #f87171;
+      text-align: center;
+      margin-bottom: 0.2em;
+    }
+    .scale-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6em;
+      width: 100%;
+    }
+    .scale-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9em;
+      color: #cbd5e1;
+    }
+    .scale-input-wrap {
+      display: flex;
+      gap: 0.8em;
+      align-items: center;
+      width: 100%;
+    }
+    /* Slider style, mobile-friendly */
+    .scale-slider {
+      flex: 1;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #334155;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .scale-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ef4444;
+      cursor: pointer;
+    }
+    .scale-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ef4444;
+      cursor: pointer;
+      border: none;
+    }
+    /* Ratio/spacing input box */
+    .scale-input {
+      width: 60px;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: #fff;
+      text-align: center;
+      padding: 0.4em 0;
+      font-size: 0.9em;
+    }
+    /* Button group */
+    .btn-group {
+      display: flex;
+      gap: 1em;
+      margin-top: 0.5em;
+    }
+    .btn {
+      flex: 1;
+      padding: 0.6em 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.9em;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-confirm {
+      background: #ef4444;
+      color: #fff;
+    }
+    .btn-reset {
+      background: #334155;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="title">Real-time Heart Rate Monitor (WebSocket)</div>
+    <div class="input-line">
+      <input id="wsUrl" placeholder="Enter WebSocket address" value="ws://192.168.31.26:8001">
+      <button id="connectBtn">Connect Heart Rate</button>
+    </div>
+    <div class="status" id="status">Not connected</div>
+    <div class="device" id="device"></div>
+    <!-- Core display area: add clickable gap layer, precisely corresponding to two spacings -->
+    <div class="heart-area">
+      <svg class="heart" id="heartIcon" viewBox="0 0 24 24">
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+      </svg>
+      <!-- Clickable gap between icon and BPM: double-click to adjust this spacing -->
+      <div class="gap-click gap-heart-bpm" id="gapHeartBpm"></div>
+      <div class="bpm" id="bpm">--</div>
+      <!-- Clickable gap between BPM and unit: double-click to adjust this spacing -->
+      <div class="gap-click gap-bpm-unit" id="gapBpmUnit"></div>
+      <div class="unit">BPM</div>
+    </div>
+  </div>
+
+  <!-- Mask layer (shared) -->
+  <div class="mask" id="mask"></div>
+
+  <!-- 1. Heart icon-BPM ratio adjustment panel (original function) -->
+  <div class="scale-panel" id="heartPanel">
+    <div class="panel-title">Adjust Icon-BPM Ratio</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>Icon size multiplier</span>
+        <span id="heartValue">4.0</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0.5" max="6" step="0.1" value="4" class="scale-slider" id="heartSlider">
+        <input type="number" min="0.5" max="6" step="0.1" value="4" class="scale-input" id="heartInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        Higher value = larger icon relative to number
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="heartReset">Reset to Default</button>
+      <button class="btn btn-confirm" id="heartConfirm">Save</button>
+    </div>
+  </div>
+
+  <!-- 2. Gray unit-BPM ratio adjustment panel (original function) -->
+  <div class="scale-panel" id="unitPanel">
+    <div class="panel-title">Adjust Unit-BPM Ratio</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>Unit text size multiplier</span>
+        <span id="unitValue">0.4</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0.1" max="2" step="0.05" value="0.4" class="scale-slider" id="unitSlider">
+        <input type="number" min="0.1" max="2" step="0.05" value="0.4" class="scale-input" id="unitInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        Higher value = larger unit text relative to number
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="unitReset">Reset to Default</button>
+      <button class="btn btn-confirm" id="unitConfirm">Save</button>
+    </div>
+  </div>
+
+  <!-- 3. Icon-BPM spacing adjustment panel (new function) -->
+  <div class="scale-panel" id="gapHeartBpmPanel">
+    <div class="panel-title">Adjust Icon-BPM Spacing</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>Spacing size</span>
+        <span id="gapHeartBpmValue">0.4em</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0" max="2" step="0.05" value="0.4" class="scale-slider" id="gapHeartBpmSlider">
+        <input type="number" min="0" max="2" step="0.05" value="0.4" class="scale-input" id="gapHeartBpmInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        Higher value = larger gap between icon and BPM, 0 = no gap
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="gapHeartBpmReset">Reset to Default</button>
+      <button class="btn btn-confirm" id="gapHeartBpmConfirm">Save</button>
+    </div>
+  </div>
+
+  <!-- 4. BPM-unit spacing adjustment panel (new function) -->
+  <div class="scale-panel" id="gapBpmUnitPanel">
+    <div class="panel-title">Adjust BPM-Unit Spacing</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>Spacing size</span>
+        <span id="gapBpmUnitValue">0.3em</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0" max="2" step="0.05" value="0.3" class="scale-slider" id="gapBpmUnitSlider">
+        <input type="number" min="0" max="2" step="0.05" value="0.3" class="scale-input" id="gapBpmUnitInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        Higher value = larger gap between BPM and unit, 0 = no gap
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="gapBpmUnitReset">Reset to Default</button>
+      <button class="btn btn-confirm" id="gapBpmUnitConfirm">Save</button>
+    </div>
+  </div>
+
+  <script>
+    // ========== Original core logic fully preserved, zero changes for stability ==========
+    const wsUrl = document.getElementById('wsUrl');
+    const connectBtn = document.getElementById('connectBtn');
+    const bpmEl = document.getElementById('bpm');
+    const statusEl = document.getElementById('status');
+    const deviceEl = document.getElementById('device');
+    const heartIcon = document.getElementById('heartIcon');
+    const unitEl = document.querySelector('.unit');
+    const mask = document.getElementById('mask');
+    const root = document.documentElement;
+    let ws = null;
+    let currentHeartRate = 0;
+    let beatInterval = null;
+    let isBeating = false;
+    let reconnectTimer = null;
+    let connectTimeout = null;
+
+    // Core heartbeat logic
+    function runSingleBeat() {
+      if (currentHeartRate <= 0 || isBeating) return;
+      isBeating = true;
+      const totalDuration = 60 / currentHeartRate * 1000;
+      const scaleUpTime = totalDuration * 0.35;
+      const scaleDownTime = totalDuration * 0.65;
+      heartIcon.style.transform = 'scale(1.25) translateX(0px)';
+      setTimeout(() => {
+        heartIcon.style.transform = 'scale(1) translateX(0px)';
+        setTimeout(() => {
+          isBeating = false;
+        }, scaleDownTime);
+      }, scaleUpTime);
+    }
+
+    function startBeatLoop(newRate) {
+      if (newRate === currentHeartRate && !beatInterval) {
+        console.log('ℹ️  Loop interrupted, restarting heartbeat loop');
+      }
+      else if (newRate !== currentHeartRate && beatInterval) {
+        clearInterval(beatInterval);
+        beatInterval = null;
+        console.log('🗑️  Old heartbeat loop cleared');
+      }
+      else if (newRate === currentHeartRate && beatInterval) {
+        return;
+      }
+      currentHeartRate = newRate;
+      console.log('❤️  Heart rate updated:', currentHeartRate);
+      if (currentHeartRate > 0) {
+        const beatCycle = 60 / currentHeartRate * 1000;
+        console.log('🔄  Starting heartbeat loop, cycle:', beatCycle.toFixed(0), 'ms');
+        beatInterval = setInterval(runSingleBeat, beatCycle);
+        runSingleBeat();
+      }
+    }
+
+    // WebSocket connection logic
+    function connect() {
+      const url = wsUrl.value.trim();
+      if (!url) { 
+        alert('Please enter a complete WebSocket address (format: ws://IP:port)'); 
+        return; 
+      }
+      localStorage.setItem('wsUrl', url);
+      if (ws) ws.close();
+      if (connectTimeout) clearTimeout(connectTimeout);
+      if (beatInterval) {
+        clearInterval(beatInterval);
+        beatInterval = null;
+      }
+      statusEl.textContent = 'Connecting...';
+      connectBtn.textContent = 'Connecting';
+
+      ws = new WebSocket(url);
+      connectTimeout = setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.error('❌ Connection timeout');
+          statusEl.textContent = 'Connection timeout';
+          connectBtn.textContent = 'Reconnect';
+          ws.close();
+        }
+      }, 5000);
+
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected successfully! Current address:', url);
+        clearTimeout(connectTimeout);
+        statusEl.textContent = 'Connected';
+        connectBtn.textContent = 'Connected';
+        clearTimeout(reconnectTimer);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const newRate = Math.round(Number(data.heart_rate) || 0);
+          console.log('📥 Received WebSocket data, raw heart rate value:', data.heart_rate, 'processed:', newRate);
+          if (newRate > 0) {
+            bpmEl.textContent = newRate;
+            deviceEl.textContent = data.status || 'Connected';
+            startBeatLoop(newRate);
+          } else {
+            console.log('⚠️  Received invalid heart rate value, skipping processing');
+          }
+        } catch (err) {
+          console.error('❌ Data parsing failed, error details:', err);
+          console.log('📥 Received raw data:', event.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('❌ WebSocket connection error, details:', err);
+        clearTimeout(connectTimeout);
+        statusEl.textContent = 'Connection error';
+        connectBtn.textContent = 'Reconnect';
+      };
+
+      ws.onclose = (e) => {
+        console.log('🔌 WebSocket disconnected, close code:', e.code, 'reason:', e.reason);
+        clearTimeout(connectTimeout);
+        if (beatInterval) {
+          clearInterval(beatInterval);
+          beatInterval = null;
+        }
+        statusEl.textContent = 'Disconnected';
+        connectBtn.textContent = 'Reconnect';
+        if (e.code !== 1000) {
+          console.log('⏳  Auto-reconnecting in 3 seconds...');
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+    }
+
+    // ========== Universal double-click detection function (compatible with floating WebView, avoids native dblclick not triggering) ==========
+    function bindDoubleClick(element, callback) {
+      let lastClickTime = 0;
+      const doubleClickDelay = 300;
+      element.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentTime = new Date().getTime();
+        const clickDiff = currentTime - lastClickTime;
+        if (clickDiff < doubleClickDelay && clickDiff > 0) {
+          callback();
+        }
+        lastClickTime = currentTime;
+      });
+    }
+
+    // ========== Original double-click functions fully preserved ==========
+    // 1. Double-click BPM number → adjust IP settings
+    bindDoubleClick(bpmEl, () => {
+      console.log('🎯 Double-clicked number, triggering IP settings');
+      const newUrl = prompt(
+        'Please enter WebSocket address (format: ws://IP:port)',
+        wsUrl.value.trim()
+      );
+      if (newUrl !== null && newUrl.trim() !== '') {
+        wsUrl.value = newUrl.trim();
+        connect();
+        alert('Address saved, reconnecting!');
+      }
+    });
+
+    // 2. Double-click heart icon → adjust icon-number ratio
+    const heartPanel = document.getElementById('heartPanel');
+    const heartSlider = document.getElementById('heartSlider');
+    const heartInput = document.getElementById('heartInput');
+    const heartValue = document.getElementById('heartValue');
+    const heartConfirm = document.getElementById('heartConfirm');
+    const heartReset = document.getElementById('heartReset');
+
+    bindDoubleClick(heartIcon, () => {
+      console.log('🎯 Double-clicked icon, triggering icon ratio adjustment');
+      heartPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // Slider and input box linkage (real-time preview)
+    heartSlider.addEventListener('input', () => {
+      const scale = parseFloat(heartSlider.value);
+      root.style.setProperty('--heart-scale', scale);
+      heartInput.value = scale;
+      heartValue.textContent = scale.toFixed(1);
+    });
+    heartInput.addEventListener('input', () => {
+      let scale = parseFloat(heartInput.value);
+      if (scale < 0.5) scale = 0.5;
+      if (scale > 6) scale = 6;
+      heartInput.value = scale;
+      root.style.setProperty('--heart-scale', scale);
+      heartSlider.value = scale;
+      heartValue.textContent = scale.toFixed(1);
+    });
+
+    // Confirm and save
+    heartConfirm.addEventListener('click', () => {
+      const scale = parseFloat(heartSlider.value);
+      localStorage.setItem('heartScale', scale);
+      heartPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('Icon ratio saved!');
+    });
+
+    // Reset to default
+    heartReset.addEventListener('click', () => {
+      const defaultScale = 4;
+      root.style.setProperty('--heart-scale', defaultScale);
+      heartSlider.value = defaultScale;
+      heartInput.value = defaultScale;
+      heartValue.textContent = defaultScale.toFixed(1);
+    });
+
+    // 3. Double-click gray unit text → adjust unit-number ratio
+    const unitPanel = document.getElementById('unitPanel');
+    const unitSlider = document.getElementById('unitSlider');
+    const unitInput = document.getElementById('unitInput');
+    const unitValue = document.getElementById('unitValue');
+    const unitConfirm = document.getElementById('unitConfirm');
+    const unitReset = document.getElementById('unitReset');
+
+    bindDoubleClick(unitEl, () => {
+      console.log('🎯 Double-clicked unit text, triggering unit ratio adjustment');
+      unitPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // Slider and input box linkage (real-time preview)
+    unitSlider.addEventListener('input', () => {
+      const scale = parseFloat(unitSlider.value);
+      root.style.setProperty('--unit-scale', scale);
+      unitInput.value = scale;
+      unitValue.textContent = scale.toFixed(2);
+    });
+    unitInput.addEventListener('input', () => {
+      let scale = parseFloat(unitInput.value);
+      if (scale < 0.1) scale = 0.1;
+      if (scale > 2) scale = 2;
+      unitInput.value = scale;
+      root.style.setProperty('--unit-scale', scale);
+      unitSlider.value = scale;
+      unitValue.textContent = scale.toFixed(2);
+    });
+
+    // Confirm and save
+    unitConfirm.addEventListener('click', () => {
+      const scale = parseFloat(unitSlider.value);
+      localStorage.setItem('unitScale', scale);
+      unitPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('Unit ratio saved!');
+    });
+
+    // Reset to default
+    unitReset.addEventListener('click', () => {
+      const defaultScale = 0.4;
+      root.style.setProperty('--unit-scale', defaultScale);
+      unitSlider.value = defaultScale;
+      unitInput.value = defaultScale;
+      unitValue.textContent = defaultScale.toFixed(2);
+    });
+
+    // ========== New: double-click gap to adjust spacing function ==========
+    // 4. Double-click icon-BPM gap → adjust spacing between icon and BPM
+    const gapHeartBpmEl = document.getElementById('gapHeartBpm');
+    const gapHeartBpmPanel = document.getElementById('gapHeartBpmPanel');
+    const gapHeartBpmSlider = document.getElementById('gapHeartBpmSlider');
+    const gapHeartBpmInput = document.getElementById('gapHeartBpmInput');
+    const gapHeartBpmValue = document.getElementById('gapHeartBpmValue');
+    const gapHeartBpmConfirm = document.getElementById('gapHeartBpmConfirm');
+    const gapHeartBpmReset = document.getElementById('gapHeartBpmReset');
+
+    // Bind double-click gap event
+    bindDoubleClick(gapHeartBpmEl, () => {
+      console.log('🎯 Double-clicked icon-BPM gap, triggering spacing adjustment');
+      gapHeartBpmPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // Slider and input box linkage (real-time preview)
+    gapHeartBpmSlider.addEventListener('input', () => {
+      const gap = parseFloat(gapHeartBpmSlider.value);
+      root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+      gapHeartBpmInput.value = gap;
+      gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+    });
+    gapHeartBpmInput.addEventListener('input', () => {
+      let gap = parseFloat(gapHeartBpmInput.value);
+      if (gap < 0) gap = 0;
+      if (gap > 2) gap = 2;
+      gapHeartBpmInput.value = gap;
+      root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+      gapHeartBpmSlider.value = gap;
+      gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+    });
+
+    // Confirm and save
+    gapHeartBpmConfirm.addEventListener('click', () => {
+      const gap = parseFloat(gapHeartBpmSlider.value);
+      localStorage.setItem('gapHeartBpm', gap);
+      gapHeartBpmPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('Icon-BPM spacing saved!');
+    });
+
+    // Reset to default
+    gapHeartBpmReset.addEventListener('click', () => {
+      const defaultGap = 0.4;
+      root.style.setProperty('--gap-heart-bpm', `${defaultGap}em`);
+      gapHeartBpmSlider.value = defaultGap;
+      gapHeartBpmInput.value = defaultGap;
+      gapHeartBpmValue.textContent = `${defaultGap.toFixed(2)}em`;
+    });
+
+    // 5. Double-click BPM-unit gap → adjust spacing between BPM and unit
+    const gapBpmUnitEl = document.getElementById('gapBpmUnit');
+    const gapBpmUnitPanel = document.getElementById('gapBpmUnitPanel');
+    const gapBpmUnitSlider = document.getElementById('gapBpmUnitSlider');
+    const gapBpmUnitInput = document.getElementById('gapBpmUnitInput');
+    const gapBpmUnitValue = document.getElementById('gapBpmUnitValue');
+    const gapBpmUnitConfirm = document.getElementById('gapBpmUnitConfirm');
+    const gapBpmUnitReset = document.getElementById('gapBpmUnitReset');
+
+    // Bind double-click gap event
+    bindDoubleClick(gapBpmUnitEl, () => {
+      console.log('🎯 Double-clicked BPM-unit gap, triggering spacing adjustment');
+      gapBpmUnitPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // Slider and input box linkage (real-time preview)
+    gapBpmUnitSlider.addEventListener('input', () => {
+      const gap = parseFloat(gapBpmUnitSlider.value);
+      root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+      gapBpmUnitInput.value = gap;
+      gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+    });
+    gapBpmUnitInput.addEventListener('input', () => {
+      let gap = parseFloat(gapBpmUnitInput.value);
+      if (gap < 0) gap = 0;
+      if (gap > 2) gap = 2;
+      gapBpmUnitInput.value = gap;
+      root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+      gapBpmUnitSlider.value = gap;
+      gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+    });
+
+    // Confirm and save
+    gapBpmUnitConfirm.addEventListener('click', () => {
+      const gap = parseFloat(gapBpmUnitSlider.value);
+      localStorage.setItem('gapBpmUnit', gap);
+      gapBpmUnitPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('BPM-unit spacing saved!');
+    });
+
+    // Reset to default
+    gapBpmUnitReset.addEventListener('click', () => {
+      const defaultGap = 0.3;
+      root.style.setProperty('--gap-bpm-unit', `${defaultGap}em`);
+      gapBpmUnitSlider.value = defaultGap;
+      gapBpmUnitInput.value = defaultGap;
+      gapBpmUnitValue.textContent = `${defaultGap.toFixed(2)}em`;
+    });
+
+    // ========== Universal close logic ==========
+    // Click mask to close all panels
+    mask.addEventListener('click', () => {
+      // Close all panels
+      document.querySelectorAll('.scale-panel').forEach(panel => {
+        panel.classList.remove('show');
+      });
+      mask.classList.remove('show');
+    });
+
+    // ========== Initialization: load all locally saved settings ==========
+    function initAllSettings() {
+      // 1. Load IP address
+      if (localStorage.getItem('wsUrl')) {
+        wsUrl.value = localStorage.getItem('wsUrl');
+      }
+      // 2. Load icon ratio
+      const savedHeartScale = localStorage.getItem('heartScale');
+      if (savedHeartScale) {
+        const scale = parseFloat(savedHeartScale);
+        root.style.setProperty('--heart-scale', scale);
+        heartSlider.value = scale;
+        heartInput.value = scale;
+        heartValue.textContent = scale.toFixed(1);
+      }
+      // 3. Load unit ratio
+      const savedUnitScale = localStorage.getItem('unitScale');
+      if (savedUnitScale) {
+        const scale = parseFloat(savedUnitScale);
+        root.style.setProperty('--unit-scale', scale);
+        unitSlider.value = scale;
+        unitInput.value = scale;
+        unitValue.textContent = scale.toFixed(2);
+      }
+      // 4. Load icon-BPM spacing
+      const savedGapHeartBpm = localStorage.getItem('gapHeartBpm');
+      if (savedGapHeartBpm) {
+        const gap = parseFloat(savedGapHeartBpm);
+        root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+        gapHeartBpmSlider.value = gap;
+        gapHeartBpmInput.value = gap;
+        gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+      }
+      // 5. Load BPM-unit spacing
+      const savedGapBpmUnit = localStorage.getItem('gapBpmUnit');
+      if (savedGapBpmUnit) {
+        const gap = parseFloat(savedGapBpmUnit);
+        root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+        gapBpmUnitSlider.value = gap;
+        gapBpmUnitInput.value = gap;
+        gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+      }
+    }
+
+    // ========== Original event bindings ==========
+    connectBtn.addEventListener('click', connect);
+    window.addEventListener('load', () => {
+      initAllSettings(); // Initialize and load all saved settings
+      connect();
+    });
+    window.addEventListener('beforeunload', () => {
+      if (beatInterval) clearInterval(beatInterval);
+      if (connectTimeout) clearTimeout(connectTimeout);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close(1000, 'Page unload');
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentHeartRate > 0 && !beatInterval) {
+        console.log('ℹ️  Page became visible again, restarting heartbeat loop');
+        startBeatLoop(currentHeartRate);
+      }
+    });
+  </script>
+</body>
+</html>
