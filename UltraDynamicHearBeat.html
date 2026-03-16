@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>实时心跳监控（WebSocket 版）</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: system-ui, sans-serif;
+    }
+    /* 全局CSS变量：统一控制所有比例/间距，调节零延迟 */
+    :root {
+      --heart-scale: 4; /* 心跳图标比例 */
+      --bpm-scale: 1.8; /* 心率数字基准比例 */
+      --unit-scale: 0.4; /* 灰字单位比例 */
+      --base-font-size: clamp(12px, 6vw, 45px); /* 全局基准字号 */
+      --gap-heart-bpm: 0.4em; /* 图标-红字间距（默认缩小，解决空隙大问题） */
+      --gap-bpm-unit: 0.3em; /* 红字-灰字间距（默认缩小，解决空隙大问题） */
+    }
+    body {
+      background: #0b1120;
+      color: #fff;
+      width: 100vw;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      place-content: safe center;
+      justify-content: safe center;
+      align-items: center;
+      text-align: center;
+      padding: 8px;
+      overflow: hidden;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .box {
+      width: 100%;
+      min-height: min-content;
+      display: flex;
+      flex-direction: column;
+      place-content: safe center;
+      justify-content: safe center;
+      align-items: center;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    /* 隐藏非核心UI，保持极简悬浮样式 */
+    .title, .input-line, .floatBtn, .status, .device {
+      display: none;
+    }
+    /* 核心内容区：移除统一gap，改为独立间距控制 */
+    .heart-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      flex-shrink: 0;
+      width: 100%;
+      text-align: center;
+      font-size: var(--base-font-size);
+      margin: auto 0;
+    }
+    /* 可点击空隙：透明层，精准对应两个间距区域，双击触发调节 */
+    .gap-click {
+      width: 100%;
+      flex-shrink: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      /* 确保点击区域铺满整个空隙，无死角 */
+      min-height: 2px;
+    }
+    .gap-heart-bpm {
+      height: var(--gap-heart-bpm);
+    }
+    .gap-bpm-unit {
+      height: var(--gap-bpm-unit);
+    }
+    /* 心跳图标：大小完全由--heart-scale变量控制 */
+    .heart {
+      width: calc(var(--heart-scale) * 1em);
+      height: auto;
+      aspect-ratio: 1/1;
+      fill: #ef4444;
+      transform-origin: center center;
+      will-change: transform;
+      flex-shrink: 0;
+      margin: 0 auto;
+      shape-rendering: geometricPrecision;
+      transform: scale(1) translateX(0px);
+      transition: transform 0.22s cubic-bezier(0.14, 0.78, 0.34, 1), width 0.1s ease;
+      padding: 0.5em;
+      cursor: pointer;
+    }
+    /* 心率数字：大小由--bpm-scale变量控制，双击调IP */
+    .bpm {
+      font-size: calc(var(--bpm-scale) * 1em);
+      font-weight: 700;
+      color: #f87171;
+      line-height: 1;
+      flex-shrink: 0;
+      margin: 0 auto;
+      width: 100%;
+      text-align: center;
+      cursor: pointer;
+      padding: 0.2em 0;
+      transition: font-size 0.1s ease;
+    }
+    /* 灰字单位：大小由--unit-scale变量控制，双击调比例 */
+    .unit {
+      font-size: calc(var(--unit-scale) * 1em);
+      color: #94a3b8;
+      flex-shrink: 0;
+      margin: 0 auto;
+      width: 100%;
+      text-align: center;
+      cursor: pointer;
+      padding: 0.2em 0;
+      transition: font-size 0.1s ease;
+    }
+    /* 半透明遮罩，点击关闭所有面板 */
+    .mask {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.7);
+      z-index: 9998;
+      display: none;
+    }
+    .mask.show {
+      display: block;
+    }
+    /* 通用调节面板样式，统一风格 */
+    .scale-panel {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #1e293b;
+      padding: 1.5em;
+      border-radius: 12px;
+      z-index: 9999;
+      width: 90%;
+      max-width: 350px;
+      display: none;
+      flex-direction: column;
+      gap: 1.2em;
+      border: 1px solid #334155;
+    }
+    .scale-panel.show {
+      display: flex;
+    }
+    .panel-title {
+      font-size: 1.2em;
+      font-weight: 600;
+      color: #f87171;
+      text-align: center;
+      margin-bottom: 0.2em;
+    }
+    .scale-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6em;
+      width: 100%;
+    }
+    .scale-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9em;
+      color: #cbd5e1;
+    }
+    .scale-input-wrap {
+      display: flex;
+      gap: 0.8em;
+      align-items: center;
+      width: 100%;
+    }
+    /* 滑块样式，适配移动端 */
+    .scale-slider {
+      flex: 1;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #334155;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .scale-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ef4444;
+      cursor: pointer;
+    }
+    .scale-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ef4444;
+      cursor: pointer;
+      border: none;
+    }
+    /* 倍数/间距输入框 */
+    .scale-input {
+      width: 60px;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: #fff;
+      text-align: center;
+      padding: 0.4em 0;
+      font-size: 0.9em;
+    }
+    /* 按钮组 */
+    .btn-group {
+      display: flex;
+      gap: 1em;
+      margin-top: 0.5em;
+    }
+    .btn {
+      flex: 1;
+      padding: 0.6em 0;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.9em;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-confirm {
+      background: #ef4444;
+      color: #fff;
+    }
+    .btn-reset {
+      background: #334155;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="title">实时心跳监控（WebSocket）</div>
+    <div class="input-line">
+      <input id="wsUrl" placeholder="输入 WebSocket 地址" value="ws://192.168.31.26:8001">
+      <button id="connectBtn">连接心跳</button>
+    </div>
+    <div class="status" id="status">未连接</div>
+    <div class="device" id="device"></div>
+    <!-- 核心显示区：新增可点击空隙层，精准对应两个间距 -->
+    <div class="heart-area">
+      <svg class="heart" id="heartIcon" viewBox="0 0 24 24">
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+      </svg>
+      <!-- 图标与红字之间的可点击空隙：双击调节此间距 -->
+      <div class="gap-click gap-heart-bpm" id="gapHeartBpm"></div>
+      <div class="bpm" id="bpm">--</div>
+      <!-- 红字与灰字之间的可点击空隙：双击调节此间距 -->
+      <div class="gap-click gap-bpm-unit" id="gapBpmUnit"></div>
+      <div class="unit">次/分钟</div>
+    </div>
+  </div>
+
+  <!-- 遮罩层（共用） -->
+  <div class="mask" id="mask"></div>
+
+  <!-- 1. 心跳图标-数字比例调节面板（原有功能） -->
+  <div class="scale-panel" id="heartPanel">
+    <div class="panel-title">调节图标-数字比例</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>图标大小倍数</span>
+        <span id="heartValue">4.0</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0.5" max="6" step="0.1" value="4" class="scale-slider" id="heartSlider">
+        <input type="number" min="0.5" max="6" step="0.1" value="4" class="scale-input" id="heartInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        数值越大，图标相对于数字越大
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="heartReset">恢复默认</button>
+      <button class="btn btn-confirm" id="heartConfirm">确定保存</button>
+    </div>
+  </div>
+
+  <!-- 2. 灰字-数字比例调节面板（原有功能） -->
+  <div class="scale-panel" id="unitPanel">
+    <div class="panel-title">调节灰字-数字比例</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>灰字大小倍数</span>
+        <span id="unitValue">0.4</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0.1" max="2" step="0.05" value="0.4" class="scale-slider" id="unitSlider">
+        <input type="number" min="0.1" max="2" step="0.05" value="0.4" class="scale-input" id="unitInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        数值越大，灰字相对于数字越大
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="unitReset">恢复默认</button>
+      <button class="btn btn-confirm" id="unitConfirm">确定保存</button>
+    </div>
+  </div>
+
+  <!-- 3. 图标-红字间距调节面板（新增功能） -->
+  <div class="scale-panel" id="gapHeartBpmPanel">
+    <div class="panel-title">调节图标-红字间距</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>间距大小</span>
+        <span id="gapHeartBpmValue">0.4em</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0" max="2" step="0.05" value="0.4" class="scale-slider" id="gapHeartBpmSlider">
+        <input type="number" min="0" max="2" step="0.05" value="0.4" class="scale-input" id="gapHeartBpmInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        数值越大，图标与红字之间的空隙越大，0为无空隙
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="gapHeartBpmReset">恢复默认</button>
+      <button class="btn btn-confirm" id="gapHeartBpmConfirm">确定保存</button>
+    </div>
+  </div>
+
+  <!-- 4. 红字-灰字间距调节面板（新增功能） -->
+  <div class="scale-panel" id="gapBpmUnitPanel">
+    <div class="panel-title">调节红字-灰字间距</div>
+    <div class="scale-item">
+      <div class="scale-label">
+        <span>间距大小</span>
+        <span id="gapBpmUnitValue">0.3em</span>
+      </div>
+      <div class="scale-input-wrap">
+        <input type="range" min="0" max="2" step="0.05" value="0.3" class="scale-slider" id="gapBpmUnitSlider">
+        <input type="number" min="0" max="2" step="0.05" value="0.3" class="scale-input" id="gapBpmUnitInput">
+      </div>
+      <div class="scale-label" style="font-size: 0.8em; color: #94a3b8;">
+        数值越大，红字与灰字之间的空隙越大，0为无空隙
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-reset" id="gapBpmUnitReset">恢复默认</button>
+      <button class="btn btn-confirm" id="gapBpmUnitConfirm">确定保存</button>
+    </div>
+  </div>
+
+  <script>
+    // ========== 原有核心逻辑完整保留，零修改，保证稳定性 ==========
+    const wsUrl = document.getElementById('wsUrl');
+    const connectBtn = document.getElementById('connectBtn');
+    const bpmEl = document.getElementById('bpm');
+    const statusEl = document.getElementById('status');
+    const deviceEl = document.getElementById('device');
+    const heartIcon = document.getElementById('heartIcon');
+    const unitEl = document.querySelector('.unit');
+    const mask = document.getElementById('mask');
+    const root = document.documentElement;
+    let ws = null;
+    let currentHeartRate = 0;
+    let beatInterval = null;
+    let isBeating = false;
+    let reconnectTimer = null;
+    let connectTimeout = null;
+
+    // 心跳核心逻辑
+    function runSingleBeat() {
+      if (currentHeartRate <= 0 || isBeating) return;
+      isBeating = true;
+      const totalDuration = 60 / currentHeartRate * 1000;
+      const scaleUpTime = totalDuration * 0.35;
+      const scaleDownTime = totalDuration * 0.65;
+      heartIcon.style.transform = 'scale(1.25) translateX(0px)';
+      setTimeout(() => {
+        heartIcon.style.transform = 'scale(1) translateX(0px)';
+        setTimeout(() => {
+          isBeating = false;
+        }, scaleDownTime);
+      }, scaleUpTime);
+    }
+
+    function startBeatLoop(newRate) {
+      if (newRate === currentHeartRate && !beatInterval) {
+        console.log('ℹ️  循环中断，重启心跳循环');
+      }
+      else if (newRate !== currentHeartRate && beatInterval) {
+        clearInterval(beatInterval);
+        beatInterval = null;
+        console.log('🗑️  旧心跳循环已清空');
+      }
+      else if (newRate === currentHeartRate && beatInterval) {
+        return;
+      }
+      currentHeartRate = newRate;
+      console.log('❤️  心率已更新：', currentHeartRate);
+      if (currentHeartRate > 0) {
+        const beatCycle = 60 / currentHeartRate * 1000;
+        console.log('🔄  启动心跳循环，周期：', beatCycle.toFixed(0), 'ms');
+        beatInterval = setInterval(runSingleBeat, beatCycle);
+        runSingleBeat();
+      }
+    }
+
+    // WebSocket连接逻辑
+    function connect() {
+      const url = wsUrl.value.trim();
+      if (!url) { 
+        alert('请输入完整的WebSocket地址（格式：ws://IP:端口）'); 
+        return; 
+      }
+      localStorage.setItem('wsUrl', url);
+      if (ws) ws.close();
+      if (connectTimeout) clearTimeout(connectTimeout);
+      if (beatInterval) {
+        clearInterval(beatInterval);
+        beatInterval = null;
+      }
+      statusEl.textContent = '连接中...';
+      connectBtn.textContent = '连接中';
+
+      ws = new WebSocket(url);
+      connectTimeout = setTimeout(() => {
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.error('❌ 连接超时');
+          statusEl.textContent = '连接超时';
+          connectBtn.textContent = '重连';
+          ws.close();
+        }
+      }, 5000);
+
+      ws.onopen = () => {
+        console.log('✅ WebSocket连接成功！当前地址：', url);
+        clearTimeout(connectTimeout);
+        statusEl.textContent = '已连接';
+        connectBtn.textContent = '已连接';
+        clearTimeout(reconnectTimer);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const newRate = Math.round(Number(data.heart_rate) || 0);
+          console.log('📥 收到WebSocket数据，原始心率值：', data.heart_rate, '处理后：', newRate);
+          if (newRate > 0) {
+            bpmEl.textContent = newRate;
+            deviceEl.textContent = data.status || '已连接';
+            startBeatLoop(newRate);
+          } else {
+            console.log('⚠️  收到无效心率值，跳过处理');
+          }
+        } catch (err) {
+          console.error('❌ 数据解析失败，错误详情：', err);
+          console.log('📥 收到的原始数据：', event.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('❌ WebSocket连接错误，详情：', err);
+        clearTimeout(connectTimeout);
+        statusEl.textContent = '连接错误';
+        connectBtn.textContent = '重连';
+      };
+
+      ws.onclose = (e) => {
+        console.log('🔌 WebSocket连接断开，关闭码：', e.code, '原因：', e.reason);
+        clearTimeout(connectTimeout);
+        if (beatInterval) {
+          clearInterval(beatInterval);
+          beatInterval = null;
+        }
+        statusEl.textContent = '已断开';
+        connectBtn.textContent = '重连';
+        if (e.code !== 1000) {
+          console.log('⏳  3秒后自动重连...');
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+    }
+
+    // ========== 通用双击判定函数（兼容悬浮WebView，避免原生dblclick不触发） ==========
+    function bindDoubleClick(element, callback) {
+      let lastClickTime = 0;
+      const doubleClickDelay = 300;
+      element.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentTime = new Date().getTime();
+        const clickDiff = currentTime - lastClickTime;
+        if (clickDiff < doubleClickDelay && clickDiff > 0) {
+          callback();
+        }
+        lastClickTime = currentTime;
+      });
+    }
+
+    // ========== 原有双击功能完整保留 ==========
+    // 1. 双击心率数字 → 调节IP设置
+    bindDoubleClick(bpmEl, () => {
+      console.log('🎯 双击数字，触发IP设置');
+      const newUrl = prompt(
+        '请输入WebSocket地址（格式：ws://IP:端口）',
+        wsUrl.value.trim()
+      );
+      if (newUrl !== null && newUrl.trim() !== '') {
+        wsUrl.value = newUrl.trim();
+        connect();
+        alert('地址已保存，正在重连！');
+      }
+    });
+
+    // 2. 双击心跳图标 → 调节图标-数字比例
+    const heartPanel = document.getElementById('heartPanel');
+    const heartSlider = document.getElementById('heartSlider');
+    const heartInput = document.getElementById('heartInput');
+    const heartValue = document.getElementById('heartValue');
+    const heartConfirm = document.getElementById('heartConfirm');
+    const heartReset = document.getElementById('heartReset');
+
+    bindDoubleClick(heartIcon, () => {
+      console.log('🎯 双击图标，触发图标比例调节');
+      heartPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // 滑块与输入框联动（实时预览）
+    heartSlider.addEventListener('input', () => {
+      const scale = parseFloat(heartSlider.value);
+      root.style.setProperty('--heart-scale', scale);
+      heartInput.value = scale;
+      heartValue.textContent = scale.toFixed(1);
+    });
+    heartInput.addEventListener('input', () => {
+      let scale = parseFloat(heartInput.value);
+      if (scale < 0.5) scale = 0.5;
+      if (scale > 6) scale = 6;
+      heartInput.value = scale;
+      root.style.setProperty('--heart-scale', scale);
+      heartSlider.value = scale;
+      heartValue.textContent = scale.toFixed(1);
+    });
+
+    // 确定保存
+    heartConfirm.addEventListener('click', () => {
+      const scale = parseFloat(heartSlider.value);
+      localStorage.setItem('heartScale', scale);
+      heartPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('图标比例已保存！');
+    });
+
+    // 恢复默认
+    heartReset.addEventListener('click', () => {
+      const defaultScale = 4;
+      root.style.setProperty('--heart-scale', defaultScale);
+      heartSlider.value = defaultScale;
+      heartInput.value = defaultScale;
+      heartValue.textContent = defaultScale.toFixed(1);
+    });
+
+    // 3. 双击灰字单位 → 调节灰字-数字比例
+    const unitPanel = document.getElementById('unitPanel');
+    const unitSlider = document.getElementById('unitSlider');
+    const unitInput = document.getElementById('unitInput');
+    const unitValue = document.getElementById('unitValue');
+    const unitConfirm = document.getElementById('unitConfirm');
+    const unitReset = document.getElementById('unitReset');
+
+    bindDoubleClick(unitEl, () => {
+      console.log('🎯 双击灰字，触发灰字比例调节');
+      unitPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // 滑块与输入框联动（实时预览）
+    unitSlider.addEventListener('input', () => {
+      const scale = parseFloat(unitSlider.value);
+      root.style.setProperty('--unit-scale', scale);
+      unitInput.value = scale;
+      unitValue.textContent = scale.toFixed(2);
+    });
+    unitInput.addEventListener('input', () => {
+      let scale = parseFloat(unitInput.value);
+      if (scale < 0.1) scale = 0.1;
+      if (scale > 2) scale = 2;
+      unitInput.value = scale;
+      root.style.setProperty('--unit-scale', scale);
+      unitSlider.value = scale;
+      unitValue.textContent = scale.toFixed(2);
+    });
+
+    // 确定保存
+    unitConfirm.addEventListener('click', () => {
+      const scale = parseFloat(unitSlider.value);
+      localStorage.setItem('unitScale', scale);
+      unitPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('灰字比例已保存！');
+    });
+
+    // 恢复默认
+    unitReset.addEventListener('click', () => {
+      const defaultScale = 0.4;
+      root.style.setProperty('--unit-scale', defaultScale);
+      unitSlider.value = defaultScale;
+      unitInput.value = defaultScale;
+      unitValue.textContent = defaultScale.toFixed(2);
+    });
+
+    // ========== 新增：双击空隙调节间距功能 ==========
+    // 4. 双击图标-红字空隙 → 调节图标与红字的间距
+    const gapHeartBpmEl = document.getElementById('gapHeartBpm');
+    const gapHeartBpmPanel = document.getElementById('gapHeartBpmPanel');
+    const gapHeartBpmSlider = document.getElementById('gapHeartBpmSlider');
+    const gapHeartBpmInput = document.getElementById('gapHeartBpmInput');
+    const gapHeartBpmValue = document.getElementById('gapHeartBpmValue');
+    const gapHeartBpmConfirm = document.getElementById('gapHeartBpmConfirm');
+    const gapHeartBpmReset = document.getElementById('gapHeartBpmReset');
+
+    // 绑定双击空隙事件
+    bindDoubleClick(gapHeartBpmEl, () => {
+      console.log('🎯 双击图标-红字空隙，触发间距调节');
+      gapHeartBpmPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // 滑块与输入框联动（实时预览）
+    gapHeartBpmSlider.addEventListener('input', () => {
+      const gap = parseFloat(gapHeartBpmSlider.value);
+      root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+      gapHeartBpmInput.value = gap;
+      gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+    });
+    gapHeartBpmInput.addEventListener('input', () => {
+      let gap = parseFloat(gapHeartBpmInput.value);
+      if (gap < 0) gap = 0;
+      if (gap > 2) gap = 2;
+      gapHeartBpmInput.value = gap;
+      root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+      gapHeartBpmSlider.value = gap;
+      gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+    });
+
+    // 确定保存
+    gapHeartBpmConfirm.addEventListener('click', () => {
+      const gap = parseFloat(gapHeartBpmSlider.value);
+      localStorage.setItem('gapHeartBpm', gap);
+      gapHeartBpmPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('图标-红字间距已保存！');
+    });
+
+    // 恢复默认
+    gapHeartBpmReset.addEventListener('click', () => {
+      const defaultGap = 0.4;
+      root.style.setProperty('--gap-heart-bpm', `${defaultGap}em`);
+      gapHeartBpmSlider.value = defaultGap;
+      gapHeartBpmInput.value = defaultGap;
+      gapHeartBpmValue.textContent = `${defaultGap.toFixed(2)}em`;
+    });
+
+    // 5. 双击红字-灰字空隙 → 调节红字与灰字的间距
+    const gapBpmUnitEl = document.getElementById('gapBpmUnit');
+    const gapBpmUnitPanel = document.getElementById('gapBpmUnitPanel');
+    const gapBpmUnitSlider = document.getElementById('gapBpmUnitSlider');
+    const gapBpmUnitInput = document.getElementById('gapBpmUnitInput');
+    const gapBpmUnitValue = document.getElementById('gapBpmUnitValue');
+    const gapBpmUnitConfirm = document.getElementById('gapBpmUnitConfirm');
+    const gapBpmUnitReset = document.getElementById('gapBpmUnitReset');
+
+    // 绑定双击空隙事件
+    bindDoubleClick(gapBpmUnitEl, () => {
+      console.log('🎯 双击红字-灰字空隙，触发间距调节');
+      gapBpmUnitPanel.classList.add('show');
+      mask.classList.add('show');
+    });
+
+    // 滑块与输入框联动（实时预览）
+    gapBpmUnitSlider.addEventListener('input', () => {
+      const gap = parseFloat(gapBpmUnitSlider.value);
+      root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+      gapBpmUnitInput.value = gap;
+      gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+    });
+    gapBpmUnitInput.addEventListener('input', () => {
+      let gap = parseFloat(gapBpmUnitInput.value);
+      if (gap < 0) gap = 0;
+      if (gap > 2) gap = 2;
+      gapBpmUnitInput.value = gap;
+      root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+      gapBpmUnitSlider.value = gap;
+      gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+    });
+
+    // 确定保存
+    gapBpmUnitConfirm.addEventListener('click', () => {
+      const gap = parseFloat(gapBpmUnitSlider.value);
+      localStorage.setItem('gapBpmUnit', gap);
+      gapBpmUnitPanel.classList.remove('show');
+      mask.classList.remove('show');
+      alert('红字-灰字间距已保存！');
+    });
+
+    // 恢复默认
+    gapBpmUnitReset.addEventListener('click', () => {
+      const defaultGap = 0.3;
+      root.style.setProperty('--gap-bpm-unit', `${defaultGap}em`);
+      gapBpmUnitSlider.value = defaultGap;
+      gapBpmUnitInput.value = defaultGap;
+      gapBpmUnitValue.textContent = `${defaultGap.toFixed(2)}em`;
+    });
+
+    // ========== 通用关闭逻辑 ==========
+    // 点击遮罩关闭所有面板
+    mask.addEventListener('click', () => {
+      // 关闭所有面板
+      document.querySelectorAll('.scale-panel').forEach(panel => {
+        panel.classList.remove('show');
+      });
+      mask.classList.remove('show');
+    });
+
+    // ========== 初始化：加载所有本地保存的设置 ==========
+    function initAllSettings() {
+      // 1. 加载IP地址
+      if (localStorage.getItem('wsUrl')) {
+        wsUrl.value = localStorage.getItem('wsUrl');
+      }
+      // 2. 加载图标比例
+      const savedHeartScale = localStorage.getItem('heartScale');
+      if (savedHeartScale) {
+        const scale = parseFloat(savedHeartScale);
+        root.style.setProperty('--heart-scale', scale);
+        heartSlider.value = scale;
+        heartInput.value = scale;
+        heartValue.textContent = scale.toFixed(1);
+      }
+      // 3. 加载灰字比例
+      const savedUnitScale = localStorage.getItem('unitScale');
+      if (savedUnitScale) {
+        const scale = parseFloat(savedUnitScale);
+        root.style.setProperty('--unit-scale', scale);
+        unitSlider.value = scale;
+        unitInput.value = scale;
+        unitValue.textContent = scale.toFixed(2);
+      }
+      // 4. 加载图标-红字间距
+      const savedGapHeartBpm = localStorage.getItem('gapHeartBpm');
+      if (savedGapHeartBpm) {
+        const gap = parseFloat(savedGapHeartBpm);
+        root.style.setProperty('--gap-heart-bpm', `${gap}em`);
+        gapHeartBpmSlider.value = gap;
+        gapHeartBpmInput.value = gap;
+        gapHeartBpmValue.textContent = `${gap.toFixed(2)}em`;
+      }
+      // 5. 加载红字-灰字间距
+      const savedGapBpmUnit = localStorage.getItem('gapBpmUnit');
+      if (savedGapBpmUnit) {
+        const gap = parseFloat(savedGapBpmUnit);
+        root.style.setProperty('--gap-bpm-unit', `${gap}em`);
+        gapBpmUnitSlider.value = gap;
+        gapBpmUnitInput.value = gap;
+        gapBpmUnitValue.textContent = `${gap.toFixed(2)}em`;
+      }
+    }
+
+    // ========== 原有事件绑定 ==========
+    connectBtn.addEventListener('click', connect);
+    window.addEventListener('load', () => {
+      initAllSettings(); // 初始化加载所有保存的设置
+      connect();
+    });
+    window.addEventListener('beforeunload', () => {
+      if (beatInterval) clearInterval(beatInterval);
+      if (connectTimeout) clearTimeout(connectTimeout);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close(1000, '页面卸载');
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentHeartRate > 0 && !beatInterval) {
+        console.log('ℹ️  页面恢复可见，重启心跳循环');
+        startBeatLoop(currentHeartRate);
+      }
+    });
+  </script>
+</body>
+</html>
