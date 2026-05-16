@@ -89,7 +89,10 @@
       cursor: pointer;
       user-select: none;
       -webkit-user-select: none;
-      touch-action: manipulation;
+      touch-action: none;
+    }
+    .heart.long-pressing {
+      filter: drop-shadow(0 0 14px rgba(248, 113, 113, 0.95));
     }
     .bpm {
       font-size: calc(var(--bpm-scale) * 1em);
@@ -558,7 +561,7 @@
       if (connectBtn) connectBtn.textContent = t(key);
     }
 
-    function bindLongPress(el, onLongPress, { duration = 5000, moveTolerance = 12 } = {}) {
+    function bindLongPress(el, onLongPress, { duration = 5000, moveTolerance = 40 } = {}) {
       let timer = null;
       let pointerId = null;
       let startX = 0;
@@ -569,6 +572,7 @@
         if (timer) clearTimeout(timer);
         timer = null;
         pointerId = null;
+        el.classList.remove('long-pressing');
       }
 
       el.addEventListener('pointerdown', (event) => {
@@ -579,8 +583,13 @@
         pointerId = event.pointerId;
         startX = event.clientX;
         startY = event.clientY;
+        el.classList.add('long-pressing');
 
-        el.setPointerCapture?.(event.pointerId);
+        try {
+          el.setPointerCapture?.(event.pointerId);
+        } catch (err) {
+          console.warn('Pointer capture failed, long press will still continue:', err);
+        }
 
         timer = setTimeout(() => {
           longPressFired = true;
@@ -596,7 +605,9 @@
         if (moved > moveTolerance) clearTimer();
       });
 
-      ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture'].forEach((type) => {
+      // Do not cancel on pointerleave/lostpointercapture.
+      // Some browsers fire those during SVG animation or pointer capture, which can cancel a valid 5s hold.
+      ['pointerup', 'pointercancel'].forEach((type) => {
         el.addEventListener(type, clearTimer);
       });
 

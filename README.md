@@ -31,7 +31,7 @@
 ### 技术实现
 - 使用 `localStorage` 保存用户选择的语言偏好
 - 首次加载时自动检测浏览器语言（`navigator.languages` / `navigator.language`）
-- 长按检测：使用 Pointer Events（`pointerdown`/`pointerup`/`pointercancel`/`pointermove`）统一处理鼠标与触摸输入，启动 5 秒定时器
+- 长按检测：使用 Pointer Events（已避免 pointerleave/lostpointercapture 误取消）（`pointerdown`/`pointerup`/`pointercancel`/`pointermove`）统一处理鼠标与触摸输入，启动 5 秒定时器
 - 如果用户在 5 秒内释放，则判定为普通点击，触发双击调节面板
 - 如果长按达到 5 秒，则触发语言切换
 
@@ -118,7 +118,7 @@ This little workaround came from my fondness for Xiaomi products and the urge to
 ### Technical Implementation
 - Uses `localStorage` to save the user's language preference
 - Automatically detects browser language on first load (`navigator.languages` / `navigator.language`)
-- Long-press detection: Uses Pointer Events (`pointerdown`/`pointerup`/`pointercancel`/`pointermove`) to handle mouse and touch input consistently, then starts a 5-second timer
+- Long-press detection: Uses Pointer Events（已避免 pointerleave/lostpointercapture 误取消） (`pointerdown`/`pointerup`/`pointercancel`/`pointermove`) to handle mouse and touch input consistently, then starts a 5-second timer
 - If the user releases within 5 seconds, it's treated as a regular click/tap (double-click to open adjustment panel)
 - If the long press reaches 5 seconds, it triggers language switching
 
