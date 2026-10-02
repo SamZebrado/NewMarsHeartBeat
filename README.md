@@ -13,7 +13,7 @@
 正是因为喜欢小米产品的设计和体验，才会折腾出这个有趣的适配方案，也感谢 HeartRateMonitorMobile 和 Floating Apps 让这个想法落地～
 
 ## 核心功能
-- 💓 实时可视化：接收 WebSocket 心率数据，通过折线图动态展示心率波动趋势
+- 💓 实时显示：接收 WebSocket 心率数据，更新当前心率数值与设备信息；当前没有历史折线图
 - 🪟 悬浮展示：适配 Android 平台 Floating Apps，实现简洁的心率悬浮组件效果
 - 🎨 双击自定义外观：支持通过双击不同区域调节界面元素比例与间距，实时预览并保存设置
 - 🌐 **双语切换**：支持中文和英文界面，**长按心形图标 5 秒钟**即可切换语言
@@ -73,7 +73,7 @@ git clone https://github.com/ccc007ccc/HeartRateMonitorMobile
 ### 核心开源依赖
 - 心率数据推送源：[HeartRateMonitorMobile](https://github.com/ccc007ccc/HeartRateMonitorMobile)（@ccc007ccc）—— 为本项目提供 WebSocket 格式的心跳数据源，感谢作者开源这一优秀的 BLE 心率监测应用
 - 悬浮窗口工具：Floating Apps（Floating Widgets）—— 支持在 Android 设备上实现简洁的心率悬浮展示效果，感谢开发团队的优秀工具
-- 数据可视化组件：[Chart.js](https://github.com/chartjs/Chart.js) —— 提供轻量高效的心率折线图展示能力
+- 当前 `index.html` 使用原生 HTML/CSS/JavaScript 显示心率，不加载 Chart.js。
 
 ## 免责声明
 - 本项目为 SamZebrado 的个人非商业项目，与小米公司、NASA、ESA 等任何组织无官方关联
@@ -81,7 +81,6 @@ git clone https://github.com/ccc007ccc/HeartRateMonitorMobile
 
 ## 许可证
 本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE) 文件。
-- 依赖组件 Chart.js：MIT License（https://github.com/chartjs/Chart.js）
 - 心跳数据对接源 HeartRateMonitorMobile：请查看其仓库许可证（https://github.com/ccc007ccc/HeartRateMonitorMobile）
 
 
@@ -100,7 +99,7 @@ Initially, I wanted to build a convenient heart rate display solution, and tried
 This little workaround came from my fondness for Xiaomi products and the urge to keep tinkering. Thanks also to HeartRateMonitorMobile and Floating Apps for making the idea possible.
 
 ## Core Features
-- 💓 Real-time visualization: Receive WebSocket heart rate data and dynamically display heart rate fluctuation trends via line charts
+- 💓 Real-time display: Receive WebSocket heart rate data and update the current numeric heart rate and device information; no historical line chart is implemented
 - 🪟 Floating display: Designed to work with Floating Apps on Android for a clean floating heart rate widget
 - 🎨 Double-click to customize appearance: Adjust element sizes and spacing by double-clicking different areas, with real-time preview and saved settings
 - 🌐 **Bilingual Support**: Supports Chinese and English; **long-press the heart icon for 5 seconds** to switch languages
@@ -160,7 +159,7 @@ git clone https://github.com/ccc007ccc/HeartRateMonitorMobile
 ### Core Open Source Dependencies
 - Heart rate data source: [HeartRateMonitorMobile](https://github.com/ccc007ccc/HeartRateMonitorMobile) (@ccc007ccc) —— Provides WebSocket-format heart rate data source for this project, thanks to the author for open-sourcing this excellent BLE heart rate monitoring app
 - Floating window tool: Floating Apps (Floating Widgets) —— Enables clean floating display of heart rate on Android devices, thanks to the development team for this great tool
-- Data visualization component: [Chart.js](https://github.com/chartjs/Chart.js) —— Provides lightweight and efficient line chart display for heart rate
+- The current `index.html` displays heart rate with native HTML/CSS/JavaScript and does not load Chart.js.
 
 ## Disclaimer
 - This is a personal non-commercial project by SamZebrado, with no official association with Xiaomi Corporation, NASA, ESA, or any other organization
@@ -168,5 +167,4 @@ git clone https://github.com/ccc007ccc/HeartRateMonitorMobile
 
 ## License
 This project is open source under the Apache License 2.0, see the [LICENSE](LICENSE) file for details.
-- Dependent component Chart.js: MIT License (https://github.com/chartjs/Chart.js)
 - Heart rate data source HeartRateMonitorMobile: Please check its repository license (https://github.com/ccc007ccc/HeartRateMonitorMobile)
