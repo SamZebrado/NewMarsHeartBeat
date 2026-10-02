@@ -13,7 +13,7 @@
 正是因为喜欢小米产品的设计和体验，才会折腾出这个有趣的适配方案，也感谢 HeartRateMonitorMobile 和 Floating Apps 让这个想法落地～
 
 ## 核心功能
-- 💓 实时显示：接收 WebSocket 心率数据，更新当前心率数值与设备信息；当前没有历史折线图
+- 💓 实时显示：接收 WebSocket 心率数据，更新当前心率数值（BPM）；当前没有历史折线图
 - 🪟 悬浮展示：适配 Android 平台 Floating Apps，实现简洁的心率悬浮组件效果
 - 🎨 双击自定义外观：支持通过双击不同区域调节界面元素比例与间距，实时预览并保存设置
 - 🌐 **双语切换**：支持中文和英文界面，**长按心形图标 5 秒钟**即可切换语言
@@ -99,7 +99,7 @@ Initially, I wanted to build a convenient heart rate display solution, and tried
 This little workaround came from my fondness for Xiaomi products and the urge to keep tinkering. Thanks also to HeartRateMonitorMobile and Floating Apps for making the idea possible.
 
 ## Core Features
-- 💓 Real-time display: Receive WebSocket heart rate data and update the current numeric heart rate and device information; no historical line chart is implemented
+- 💓 Real-time display: Receive WebSocket heart rate data and update the current numeric heart rate (BPM); no historical line chart is implemented
 - 🪟 Floating display: Designed to work with Floating Apps on Android for a clean floating heart rate widget
 - 🎨 Double-click to customize appearance: Adjust element sizes and spacing by double-clicking different areas, with real-time preview and saved settings
 - 🌐 **Bilingual Support**: Supports Chinese and English; **long-press the heart icon for 5 seconds** to switch languages
